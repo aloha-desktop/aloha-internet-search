@@ -10,32 +10,56 @@ export default class InternetSearchPlugin extends Plugin {
     throw new Error(`This tool is not available`)
   }
 
+  computeScore(text: string, keywordsList: string[]): number {
+    let score = 0
+    const lowerText = text.toLowerCase()
+    for (const keyword of keywordsList) {
+      if (keyword && lowerText.includes(keyword.toLowerCase())) {
+        score += 10
+      }
+    }
+    return score
+  }
+
   async webSearch(query: string): Promise<string> {
     const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`
     const body = await this.getContext().renderUrl(url)
     const $ = cheerio.load(body)
+
+    const keywordsList = query.split(/\s+/)
+
     const results = $('.links_main')
-      .map((_i, el) => {
+      .map((idx, el) => {
         const $el = $(el)
         const url = $el.find('.result__title a').attr('href') || ''
         const iconUrl = $el.find('.result__icon img').attr('src') || ''
+        const title = $el.find('.result__title a').text()
+        const description = $el.find('.result__snippet').text()?.trim() || ''
+
+        const score = this.computeScore(title + ' ' + description, keywordsList) - idx // penalize for the further down the list
+
         return {
-          title: $el.find('.result__title a').text(),
+          title,
           url: url.startsWith('//') ? `https:${url}` : url,
-          description: $el.find('.result__snippet').text()?.trim() || '',
+          description,
           iconUrl: iconUrl.startsWith('//') ? `https:${iconUrl}` : iconUrl,
+          score
         }
       })
       .get()
-  
+
+    const topResults = results
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5)
+
     // Format results as markdown
-    const markdownResults = results
+    const markdownResults = topResults
       .map((result) => {
         const icon = result.iconUrl ? `![icon =20x20](${result.iconUrl}) ` : ''
         return `## ${icon}[${result.title}](${result.url})\n\n${result.description}\n`
       })
       .join('\n')
-  
+
     return `Here's what I found on the web for \`${query}\`. Visit the links to get more accurate information.\n\n${markdownResults}`
   }
 }
